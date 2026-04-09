@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 #================================================================
 # CloudDrive2 多实例一键部署与管理脚本
@@ -118,7 +117,7 @@ find_available_port() {
 
 validate_name() {
     local name="$1"
-    if [[ ! "${name}" =~ ^[a-zA-Z0-9_]+$ ]]; then
+    if [[ ! "${name}" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
         return 1
     fi
     return 0
@@ -142,17 +141,15 @@ is_service_running() {
 
 umount_instance() {
     local target_dir="${BASE_DIR}/${1}"
-    if [[ -d "${target_dir}/CloudNAS" ]]; then
-        info "正在卸载 ${1} 的 FUSE 挂载点..."
-        local mount_points
-        mount_points=$(mount | grep "${target_dir}/CloudNAS" | awk '{print $3}' | sort -r)
-        if [[ -n "${mount_points}" ]]; then
-            while IFS= read -r mp; do
-                umount -l "${mp}" 2>/dev/null || fusermount -uz "${mp}" 2>/dev/null || true
-            done <<< "${mount_points}"
-            info "FUSE 挂载点已卸载。"
-        fi
-    fi
+    info "正在卸载 ${1} 的 FUSE 挂载点..."
+    mount | grep "${target_dir}/" | awk '{print $3}' | sort -r | while IFS= read -r mp; do
+        [[ -z "${mp}" ]] && continue
+        umount -l "${mp}" 2>/dev/null || fusermount -uz "${mp}" 2>/dev/null || true
+    done
+    mount | grep "${target_dir}/" | awk '{print $3}' | sort -r | while IFS= read -r mp; do
+        [[ -z "${mp}" ]] && continue
+        fusermount -uz "${mp}" 2>/dev/null || true
+    done
 }
 
 #================================================================
@@ -200,7 +197,7 @@ add_instance() {
             continue
         fi
         if ! validate_name "${instance_name}"; then
-            error "名称无效，只能包含英文、数字和下划线。"
+            error "名称无效，必须以字母或下划线开头，只能包含英文、数字和下划线。"
             continue
         fi
         if service_exists_in_compose "${instance_name}"; then
@@ -299,17 +296,17 @@ delete_instance() {
     ${COMPOSE_CMD} -f "${COMPOSE_FILE}" stop "${target}" 2>/dev/null || true
     ${COMPOSE_CMD} -f "${COMPOSE_FILE}" rm -f "${target}" 2>/dev/null || true
 
-    umount_instance "${target}"
+    if [[ "${delete_data,,}" == "y" ]]; then
+        umount_instance "${target}"
+        info "正在删除数据目录: ${BASE_DIR}/${target}..."
+        rm -rf "${BASE_DIR}/${target}" 2>/dev/null || true
+        if [[ -d "${BASE_DIR}/${target}" ]]; then
+            warn "部分文件可能需要重启后手动删除: ${BASE_DIR}/${target}"
+        fi
+    fi
 
     info "正在从 docker-compose.yml 中移除 '${target}'..."
     remove_service_from_compose "${target}"
-
-    if [[ "${delete_data,,}" == "y" ]]; then
-        info "正在删除数据目录: ${BASE_DIR}/${target}..."
-        rm -rf "${BASE_DIR}/${target}"
-    else
-        info "数据目录已保留: ${BASE_DIR}/${target}"
-    fi
 
     info "实例 '${target}' 已成功删除。"
 }
@@ -318,10 +315,8 @@ remove_service_from_compose() {
     local svc="$1"
     local tmp_file="${COMPOSE_FILE}.tmp"
     local in_block=0
-    local brace_depth=0
-    local bracket_depth=0
 
-    while IFS= read -r line; do
+    while IFS= read -r line || [[ -n "${line}" ]]; do
         if [[ "${line}" =~ ^[[:space:]]*${svc}:[[:space:]]*$ ]]; then
             in_block=1
             continue
@@ -551,20 +546,24 @@ uninstall_all() {
 
     for svc in ${all_services}; do
         info "正在停止实例 '${svc}'..."
-        ${COMPOSE_CMD} -f "${COMPOSE_FILE}" stop "${svc}" 2>/dev/null || true
-        ${COMPOSE_CMD} -f "${COMPOSE_FILE}" rm -f "${svc}" 2>/dev/null || true
+        docker stop "${svc}" 2>/dev/null || true
+        docker rm -f "${svc}" 2>/dev/null || true
         umount_instance "${svc}"
     done
 
     info "正在强制卸载所有残余 FUSE 挂载点..."
-    local mount_points
-    mount_points=$(mount | grep "${BASE_DIR}" | awk '{print $3}' | sort -r)
-    while IFS= read -r mp; do
-        [[ -n "${mp}" ]] && umount -l "${mp}" 2>/dev/null || fusermount -uz "${mp}" 2>/dev/null || true
-    done <<< "${mount_points}"
+    mount | grep "${BASE_DIR}/" | awk '{print $3}' | sort -r | while IFS= read -r mp; do
+        [[ -z "${mp}" ]] && continue
+        umount -l "${mp}" 2>/dev/null || true
+        fusermount -uz "${mp}" 2>/dev/null || true
+    done
 
     info "正在删除工作目录: ${BASE_DIR}..."
-    rm -rf "${BASE_DIR}"
+    rm -rf "${BASE_DIR}" 2>/dev/null || true
+
+    if [[ -d "${BASE_DIR}" ]]; then
+        warn "部分文件可能需要重启系统后手动删除: ${BASE_DIR}"
+    fi
 
     info "所有 CloudDrive2 实例及数据已清理完毕。"
 }
