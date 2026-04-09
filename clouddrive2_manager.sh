@@ -565,6 +565,10 @@ uninstall_all() {
         warn "部分文件可能需要重启系统后手动删除: ${BASE_DIR}"
     fi
 
+    info "正在清理 CD2 镜像..."
+    docker rmi "${IMAGE_NAME}" 2>/dev/null || true
+    docker image prune -f 2>/dev/null || true
+
     info "所有 CloudDrive2 实例及数据已清理完毕。"
 }
 
