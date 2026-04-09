@@ -569,6 +569,9 @@ uninstall_all() {
     docker rmi "${IMAGE_NAME}" 2>/dev/null || true
     docker image prune -f 2>/dev/null || true
 
+    info "正在清理未使用的 Docker 网络..."
+    docker network prune -f 2>/dev/null || true
+
     info "所有 CloudDrive2 实例及数据已清理完毕。"
 }
 
