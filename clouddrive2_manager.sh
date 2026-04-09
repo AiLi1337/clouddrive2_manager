@@ -140,6 +140,21 @@ is_service_running() {
     docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${1}$"
 }
 
+umount_instance() {
+    local target_dir="${BASE_DIR}/${1}"
+    if [[ -d "${target_dir}/CloudNAS" ]]; then
+        info "正在卸载 ${1} 的 FUSE 挂载点..."
+        local mount_points
+        mount_points=$(mount | grep "${target_dir}/CloudNAS" | awk '{print $3}' | sort -r)
+        if [[ -n "${mount_points}" ]]; then
+            while IFS= read -r mp; do
+                umount -l "${mp}" 2>/dev/null || fusermount -uz "${mp}" 2>/dev/null || true
+            done <<< "${mount_points}"
+            info "FUSE 挂载点已卸载。"
+        fi
+    fi
+}
+
 #================================================================
 # 2. 交互式主菜单
 #================================================================
@@ -283,6 +298,8 @@ delete_instance() {
     info "正在停止实例 '${target}'..."
     ${COMPOSE_CMD} -f "${COMPOSE_FILE}" stop "${target}" 2>/dev/null || true
     ${COMPOSE_CMD} -f "${COMPOSE_FILE}" rm -f "${target}" 2>/dev/null || true
+
+    umount_instance "${target}"
 
     info "正在从 docker-compose.yml 中移除 '${target}'..."
     python3 -c "
@@ -541,6 +558,10 @@ uninstall_all() {
         info "正在停止所有容器..."
         ${COMPOSE_CMD} -f "${COMPOSE_FILE}" down 2>/dev/null || true
     fi
+
+    for svc in $(list_services); do
+        umount_instance "${svc}"
+    done
 
     info "正在删除工作目录: ${BASE_DIR}..."
     rm -rf "${BASE_DIR}"
