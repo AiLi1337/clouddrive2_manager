@@ -302,15 +302,7 @@ delete_instance() {
     umount_instance "${target}"
 
     info "正在从 docker-compose.yml 中移除 '${target}'..."
-    python3 -c "
-import yaml, sys
-with open('${COMPOSE_FILE}', 'r') as f:
-    data = yaml.safe_load(f)
-if data and 'services' in data and '${target}' in data['services']:
-    del data['services']['${target}']
-with open('${COMPOSE_FILE}', 'w') as f:
-    yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-" 2>/dev/null || remove_service_with_sed "${target}"
+    remove_service_from_compose "${target}"
 
     if [[ "${delete_data,,}" == "y" ]]; then
         info "正在删除数据目录: ${BASE_DIR}/${target}..."
@@ -322,20 +314,20 @@ with open('${COMPOSE_FILE}', 'w') as f:
     info "实例 '${target}' 已成功删除。"
 }
 
-remove_service_with_sed() {
+remove_service_from_compose() {
     local svc="$1"
     local tmp_file="${COMPOSE_FILE}.tmp"
     local in_block=0
-    local line_count=0
+    local brace_depth=0
+    local bracket_depth=0
 
     while IFS= read -r line; do
-        ((line_count++))
-        if [[ "${line}" =~ ^[[:space:]]*${svc}: ]]; then
+        if [[ "${line}" =~ ^[[:space:]]*${svc}:[[:space:]]*$ ]]; then
             in_block=1
             continue
         fi
         if [[ ${in_block} -eq 1 ]]; then
-            if [[ "${line}" =~ ^[[:space:]]{2}[a-zA-Z0-9_]+: ]] && [[ ! "${line}" =~ ^[[:space:]]*${svc}: ]]; then
+            if [[ "${line}" =~ ^[[:space:]]{2}[a-zA-Z0-9_]+:[[:space:]] ]]; then
                 in_block=0
                 echo "${line}" >> "${tmp_file}"
             fi
@@ -554,14 +546,22 @@ uninstall_all() {
         return
     fi
 
-    if [[ -f "${COMPOSE_FILE}" ]]; then
-        info "正在停止所有容器..."
-        ${COMPOSE_CMD} -f "${COMPOSE_FILE}" down 2>/dev/null || true
-    fi
+    local all_services
+    all_services=$(list_services)
 
-    for svc in $(list_services); do
+    for svc in ${all_services}; do
+        info "正在停止实例 '${svc}'..."
+        ${COMPOSE_CMD} -f "${COMPOSE_FILE}" stop "${svc}" 2>/dev/null || true
+        ${COMPOSE_CMD} -f "${COMPOSE_FILE}" rm -f "${svc}" 2>/dev/null || true
         umount_instance "${svc}"
     done
+
+    info "正在强制卸载所有残余 FUSE 挂载点..."
+    local mount_points
+    mount_points=$(mount | grep "${BASE_DIR}" | awk '{print $3}' | sort -r)
+    while IFS= read -r mp; do
+        [[ -n "${mp}" ]] && umount -l "${mp}" 2>/dev/null || fusermount -uz "${mp}" 2>/dev/null || true
+    done <<< "${mount_points}"
 
     info "正在删除工作目录: ${BASE_DIR}..."
     rm -rf "${BASE_DIR}"
