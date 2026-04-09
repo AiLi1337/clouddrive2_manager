@@ -230,7 +230,7 @@ add_instance() {
 
     info "正在追加服务到 docker-compose.yml..."
     cat >> "${COMPOSE_FILE}" << YAML
-  ${instance_name}:
+  "${instance_name}":
     image: ${IMAGE_NAME}
     container_name: ${instance_name}
     privileged: true
