@@ -124,11 +124,11 @@ validate_name() {
 }
 
 service_exists_in_compose() {
-    grep -q "^  ${1}:" "${COMPOSE_FILE}" 2>/dev/null
+    grep -qE "^  \"?${1}\"?:" "${COMPOSE_FILE}" 2>/dev/null
 }
 
 list_services() {
-    grep -E '^  [a-zA-Z0-9_]+:' "${COMPOSE_FILE}" 2>/dev/null | sed 's/://g' | sed 's/^  //' || true
+    grep -E '^  "?[a-zA-Z_][a-zA-Z0-9_]*"?:' "${COMPOSE_FILE}" 2>/dev/null | sed 's/^  "//;s/^  //;s/":.*//;s/:.*//' || true
 }
 
 count_services() {
@@ -317,7 +317,7 @@ remove_service_from_compose() {
     local in_block=0
 
     while IFS= read -r line || [[ -n "${line}" ]]; do
-        if [[ "${line}" =~ ^[[:space:]]*${svc}:[[:space:]]*$ ]]; then
+        if [[ "${line}" =~ ^[[:space:]]*\"?${svc}\"?:[[:space:]]*$ ]]; then
             in_block=1
             continue
         fi
@@ -363,7 +363,7 @@ view_status() {
         fi
 
         local compose_line
-        compose_line=$(grep -A 20 "^  ${svc}:" "${COMPOSE_FILE}" | grep -oP '"\K[0-9]+(?=:19798)' | head -1)
+        compose_line=$(grep -AE 20 "^  \"?${svc}\"?:" "${COMPOSE_FILE}" | grep -oP '"\K[0-9]+(?=:19798)' | head -1)
         port="${compose_line:-N/A}"
 
         printf "%-20s %-15s %-12s %-15s %-12s\n" \
@@ -472,7 +472,7 @@ generate_caddy_config() {
     for svc in ${services}; do
         if is_service_running "${svc}"; then
             local port
-            port=$(grep -A 20 "^  ${svc}:" "${COMPOSE_FILE}" | grep -oP '"\K[0-9]+(?=:19798)' | head -1)
+            port=$(grep -AE 20 "^  \"?${svc}\"?:" "${COMPOSE_FILE}" | grep -oP '"\K[0-9]+(?=:19798)' | head -1)
             if [[ -n "${port}" ]]; then
                 cat >> "${caddyfile}" << CADDY
 ${svc}.${domain} {
@@ -498,7 +498,7 @@ generate_nginx_config() {
     for svc in ${services}; do
         if is_service_running "${svc}"; then
             local port
-            port=$(grep -A 20 "^  ${svc}:" "${COMPOSE_FILE}" | grep -oP '"\K[0-9]+(?=:19798)' | head -1)
+            port=$(grep -AE 20 "^  \"?${svc}\"?:" "${COMPOSE_FILE}" | grep -oP '"\K[0-9]+(?=:19798)' | head -1)
             if [[ -n "${port}" ]]; then
                 cat >> "${nginx_conf}" << NGINX
 server {
